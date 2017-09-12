@@ -1,0 +1,20 @@
+{
+  "name": "tnl",
+  "version": "1.0.0",
+  "description": "A 3d game.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "box-intersect": "^1.0.1",
+    "inherit-class": "^1.0.1",
+    "keycodes": "^0.2.5",
+    "physijs": "0.0.4",
+    "three": "^0.87.1",
+    "tinycolor": "0.0.1",
+    "tinycolor2": "^1.4.1"
+  }
+}
