@@ -6,6 +6,7 @@ var inherits = require('inherit-class');
 var boxIntersect = require("box-intersect");
 var tc = require("tinycolor2");
 var key = require('keycodes');
+var KDTree = require("kd-tree-javascript").kdTree;
 var keys = function(){
     return Array.prototype.slice.call(arguments,0,arguments.length).map(oneKey);
     function oneKey(k){
@@ -16,6 +17,18 @@ var pi = Math.PI;
 
 function colorToNumber(clr){
     return parseInt(clr.toHex(),16);
+}
+
+function sq(x){
+    return x*x;
+}
+
+var sqrt = Math.sqrt;
+
+function euclidean(v1,v2){
+    return sqrt(sq(v1.x-v2.x)+
+                sq(v1.y-v2.y)+
+                sq(v1.z-v2.z));
 }
 
 puff.pollute(window);
@@ -69,13 +82,34 @@ function PlayWorld(){
     c("collect-predicate",function(p){
         this.p = p;
     });
-    
+    c("architecture");
+
     var s = this.system.bind(this);
+    
+    this.architecture = new KDTree([],euclidean,['x','y','z']);
+    var architecture = this.architecture;
+    s({
+        name:"architecture",
+        components:["architecture","msh"],
+        arrival:function(a,m,e){
+            var msh = m.msh;
+            a.node = {e:e,
+                      x:msh.position.x,
+                      y:msh.position.y,
+                      z:msh.position.z
+                     };
+            architecture.insert(a.node);
+        },
+        removal:function(a,m,e){
+            architecture.remove(a.node);
+        }
+    });
+    
     var bulletBoxes = undefined;
     var bulletMap = undefined;
     var targetMap = undefined;
     var bbox = new THREE.Box3();
-    var self = this;
+    var self = this;   
     s({
         name:"bullets",
         components:["geom","mtrl","msh","bullet"],
@@ -196,7 +230,7 @@ function definedP(x){
 PlayWorld.prototype.farFromCamera = function(e){
     var c = this.camera;
     var msh = e.get("msh").msh;
-    return c.position.distanceTo(msh.position) > 30;
+    return c.position.distanceTo(msh.position) > 20;
 };
 
 PlayWorld.prototype.setVelocity = function(e,vx,vy,vz){
@@ -270,7 +304,7 @@ PlayWorld.prototype.updateTime = function(){
 PlayWorld.prototype.initControls = function(){
     this.pressedKeys = {};
     this.keyHooks = {};
-    this.bulletPeriod = 100;
+    this.bulletPeriod = 150;
     this.lastFire = -Infinity;
     
     // var xSpeed = 0.1;
@@ -281,17 +315,17 @@ PlayWorld.prototype.initControls = function(){
     document.addEventListener("keyup", this.method("keyUp"), false);
 
     this.addKeyDownHook('up w', function(){
-        this.setVelocity(this.player,0,0.025,0);
+        this.setVelocity(this.player,undefined,0.045,undefined);
     });
     this.addKeyDownHook('down s', function(){
-        this.setVelocity(this.player,0,-0.025,0);
+        this.setVelocity(this.player,undefined,-0.045,undefined);
     });
 
     this.addKeyDownHook('left a', function(){
-        this.setVelocity(this.player,-0.025,0,0);
+        this.setVelocity(this.player,-0.045,undefined,undefined);
     });
     this.addKeyDownHook('right d', function(){
-        this.setVelocity(this.player,0.025,0,0);
+        this.setVelocity(this.player,0.045,undefined,undefined);
     });
     this.addKeyDownHook('space', function(){
         if((this.now - this.lastFire) > this.bulletPeriod){
@@ -357,24 +391,33 @@ PlayWorld.prototype.bullet = function(from, speed){
 PlayWorld.prototype.initPlayer = function(){
     this.player = this.entity();
     //var g = new THREE.BoxGeometry(0.5,0.5,1.2);
+    var body = new THREE.Geometry();
     var g = new THREE.ConeGeometry(0.25,1.2,3);
-    g.rotateX(-pi/2);
+    var wings = new THREE.ConeGeometry(0.25,1.2,3);
+    var m = new THREE.Matrix4();
+    m.makeScale(4,0.75,0.3);
+    wings.applyMatrix(m);
+    
+    body.merge(wings);
+    body.merge(g);
+    body.rotateX(-pi/2);
+
     var m = new THREE.MeshPhongMaterial({
         color:0xff0000,
         specular:0xffffff,
         shininess:10
     });
-    this.player.add("geom",g).add("mtrl",m);
-    this.player.add("msh",g,m);
+    this.player.add("geom",body).add("mtrl",m);
+    this.player.add("msh",body,m);
     this.player.get("msh").msh.position.set(0,2,1);
-    this.player.add("vel",0,0.025,0);
-    this.player.add("friction",0.9);
+    this.player.add("vel",0,0.025,-0.1);
+    this.player.add("friction",0.9,0.9,1.0);
     this.player.add("target-rotation",0.085,0,0,0);
     this.player.add("velocity-target-rotation-relation",function(vel){
         return {
-            x:pzn(vel.y,pi/4,0,-pi/4),
-            y:pzn(vel.x,-pi/8,0,pi/8),
-            z:pzn(vel.x,-pi/8,0,pi/8)
+            x:pzn(vel.y,pi/8,0,-pi/8),
+            y:pzn(vel.x,-pi/16,0,pi/16),
+            z:pzn(vel.x,-pi/16,0,pi/16)
         };
         function pzn(v,p,z,n){
             if(v>0.01) return p;
@@ -396,7 +439,7 @@ PlayWorld.prototype.initWorld = function(){
     this.floorLength = 100;
     this.floorWidth = 7;
     this.initFloor(randomFloor(this.floorWidth,this.floorLength));
-    this.cameraIncr = -0.07;
+    this.cameraIncr = -0.1;
 
     this.initPlayer();
     this.initControls();
@@ -426,7 +469,7 @@ PlayWorld.prototype.initFloor = function(heightMap,zInit,xInit){
     heightMap.forEach(function(row,rowIndex){
         row.forEach(function(h,colIndex){
             var opts = {
-                targetable:h>0.5 ? true : false,
+                targetable:h>1.5 ? true : false,
                 position:[xInit+0.5+colIndex,h/2,-rowIndex+zInit],
                 shape:[1,h,1],
                 color:colorToNumber(tc({r:intInRange(0,200),g:intInRange(200,254),b:intInRange(0,200)}))};
@@ -448,8 +491,11 @@ PlayWorld.prototype.setupThree = function(){
     this.camera = camera;
     this.renderer = renderer;
 
+    this.cameraTarget = {x:0,y:3.5,z:5};
+    this.cameraTracking = 0.99;
+
     camera.position.z = 5;
-    camera.position.y = 2;
+    camera.position.y = 3.5;
 
     var dirLight = new THREE.DirectionalLight(0xffffff, 1);
     dirLight.position.set(-5, 10, 0);
@@ -461,6 +507,24 @@ PlayWorld.prototype.setupThree = function(){
     this.dirLight = dirLight;
     this.ambientLight = ambientLight;
     return this;
+};
+
+PlayWorld.prototype.updateCameraPosition = function(){
+    var rt = this.cameraTracking;
+    var rtp = (1-this.cameraTracking);
+    if(this.player.has("msh")){
+        var msh = this.player.get("msh").msh;
+        this.cameraTarget = {
+            x:(msh.position.x+0)/2,
+            y:(msh.position.y+3.5)/2,
+            z:(msh.position.z + 4)
+        };
+        this.camera.position.x = rt*this.cameraTarget.x+rtp*this.camera.position.x;
+        this.camera.position.y = rt*this.cameraTarget.y+rtp*this.camera.position.y;
+        this.camera.position.z = rt*this.cameraTarget.z+rtp*this.camera.position.z;
+    } else {
+
+    }
 };
 
 
@@ -482,6 +546,7 @@ PlayWorld.prototype.block = function(opts){
     var pos = opts('position');
     e.get("msh").msh.position.set(pos[0],pos[1],pos[2]);
     if(opts('targetable')) e.add("targetable");
+    e.add("architecture");
     return e;
 };
 PlayWorld.prototype.block.opts = {
@@ -518,17 +583,26 @@ PlayWorld.prototype.render = function(){
         this.runSystem("collected");
         this.runSystem("bullets");
         this.renderer.render(this.scene, this.camera);
-        this.camera.position.z += this.cameraIncr;
-        if(this.camera.position.z < -100){
-            this.camera.position.z = -100;
-            this.cameraIncr = this.cameraIncr*-1.0;
+        // this.camera.position.z += this.cameraIncr;
+        // if(this.camera.position.z < -100){
+        //     this.camera.position.z = -100;
+        //     this.cameraIncr = this.cameraIncr*-1.0;
+        // }
+        // if(this.camera.position.z > 5){
+        //     this.camera.position.z = 5;
+        //     this.cameraIncr = this.cameraIncr*-1.0;
+        // }
+        // this.player.get("msh").msh.position.z = this.camera.position.z - 4;
+        //this.camera.position.z = this.player.get("msh").msh.position.z + 4;
+        var pp = this.player.get("msh").msh.position;
+        if(pp.z < -100){
+            pp.z = 0;
         }
-        if(this.camera.position.z > 5){
-            this.camera.position.z = 5;
-            this.cameraIncr = this.cameraIncr*-1.0;
-        }
-        this.player.get("msh").msh.position.z = this.camera.position.z - 2;
+        this.updateCameraPosition();
         requestAnimationFrame(this.render.bind(this));
+
+        var pmesh = this.player.get("msh").msh;
+        var near = this.architecture.nearest({x:pmesh.position.x,y:pmesh.position.y,z:pmesh.position.z},5,10);        
     }
 };
 
